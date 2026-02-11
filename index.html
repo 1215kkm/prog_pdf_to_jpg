@@ -361,6 +361,28 @@
         </div>
 
         <div class="save-mode-section">
+            <div class="section-title">변환 모드</div>
+            <div class="save-mode-options">
+                <label class="save-mode-option selected" id="modePerPage" onclick="selectPageMode('per-page')">
+                    <input type="radio" name="pageMode" value="per-page" checked>
+                    <div class="option-title">페이지별 JPG</div>
+                    <div class="option-desc">PDF의 각 페이지를 개별 JPG 파일로 저장합니다.</div>
+                    <div class="option-example">보고서.pdf (3페이지)
+→ 보고서_page001.jpg
+→ 보고서_page002.jpg
+→ 보고서_page003.jpg</div>
+                </label>
+                <label class="save-mode-option" id="modePerFile" onclick="selectPageMode('per-file')">
+                    <input type="radio" name="pageMode" value="per-file">
+                    <div class="option-title">파일별 JPG (합본)</div>
+                    <div class="option-desc">PDF의 모든 페이지를 세로로 이어붙여 하나의 긴 JPG로 저장합니다.</div>
+                    <div class="option-example">보고서.pdf (3페이지)
+→ 보고서.jpg (한 장에 모든 페이지)</div>
+                </label>
+            </div>
+        </div>
+
+        <div class="save-mode-section">
             <div class="section-title">저장 방식</div>
             <div class="save-mode-options">
                 <label class="save-mode-option selected" id="modeNewFolder" onclick="selectSaveMode('new-folder')">
@@ -371,20 +393,16 @@
   문서/
     보고서.jpg
   계약서/
-    계약서_page001.jpg
-    계약서_page002.jpg</div>
+    계약서_page001.jpg</div>
                 </label>
                 <label class="save-mode-option" id="modeSameFolder" onclick="selectSaveMode('same-folder')">
                     <input type="radio" name="saveMode" value="same-folder">
                     <div class="option-title">원본 PDF와 같은 위치</div>
-                    <div class="option-desc">각 PDF 파일이 있는 폴더에 바로 JPG를 저장합니다. 별도의 출력 폴더가 필요 없습니다.</div>
+                    <div class="option-desc">각 PDF 파일이 있는 폴더에 바로 JPG를 저장합니다.</div>
                     <div class="option-example">원본폴더/
   문서/
     보고서.pdf
-    보고서.jpg  (여기에 저장)
-  계약서/
-    계약서.pdf
-    계약서_page001.jpg  (여기에 저장)</div>
+    보고서.jpg  (여기에 저장)</div>
                 </label>
             </div>
         </div>
@@ -440,11 +458,19 @@
         let convertedImages = [];  // { name, blob, url }
         let rootDirHandle = null;  // source folder handle
         let saveMode = 'new-folder';
+        let pageMode = 'per-page';  // 'per-page' or 'per-file'
         const hasFileSystemAPI = ('showDirectoryPicker' in window);
 
         // Check API support
         if (!hasFileSystemAPI) {
             document.getElementById('apiWarning').style.display = 'block';
+        }
+
+        // Page mode selection
+        function selectPageMode(mode) {
+            pageMode = mode;
+            document.getElementById('modePerPage').classList.toggle('selected', mode === 'per-page');
+            document.getElementById('modePerFile').classList.toggle('selected', mode === 'per-file');
         }
 
         // Save mode selection
@@ -691,38 +717,65 @@
                 const dirParts = entry.relativePath.split('/');
                 dirParts.pop(); // remove filename
                 const relativeDir = dirParts.join('/');
+                const pdfBaseName = entry.file.name.replace(/\.pdf$/i, '');
 
-                for (let i = 1; i <= pdf.numPages; i++) {
+                if (pageMode === 'per-file') {
+                    // === Merge all pages into one tall JPG ===
                     try {
-                        setStatus(`변환 중: ${entry.relativePath} (${i}/${pdf.numPages}페이지)`);
+                        setStatus(`변환 중: ${entry.relativePath} (전체 ${pdf.numPages}페이지 합치는 중...)`);
 
-                        const page = await pdf.getPage(i);
-                        const viewport = page.getViewport({ scale });
+                        // First pass: render each page to get dimensions
+                        const pageCanvases = [];
+                        let totalHeight = 0;
+                        let maxWidth = 0;
 
-                        const canvas = document.createElement('canvas');
-                        canvas.width = viewport.width;
-                        canvas.height = viewport.height;
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            setStatus(`변환 중: ${entry.relativePath} (${i}/${pdf.numPages}페이지 렌더링)`);
 
-                        const ctx = canvas.getContext('2d');
-                        ctx.fillStyle = '#FFFFFF';
-                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale });
 
-                        await page.render({ canvasContext: ctx, viewport }).promise;
+                            const canvas = document.createElement('canvas');
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+
+                            const ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                            await page.render({ canvasContext: ctx, viewport }).promise;
+
+                            pageCanvases.push(canvas);
+                            totalHeight += viewport.height;
+                            if (viewport.width > maxWidth) maxWidth = viewport.width;
+
+                            processedPages++;
+                            updateProgress(processedPages, totalPages);
+                        }
+
+                        // Second pass: stitch into one tall canvas
+                        setStatus(`변환 중: ${entry.relativePath} (이미지 합치는 중...)`);
+                        const mergedCanvas = document.createElement('canvas');
+                        mergedCanvas.width = maxWidth;
+                        mergedCanvas.height = totalHeight;
+                        const mergedCtx = mergedCanvas.getContext('2d');
+                        mergedCtx.fillStyle = '#FFFFFF';
+                        mergedCtx.fillRect(0, 0, maxWidth, totalHeight);
+
+                        let yOffset = 0;
+                        for (const pc of pageCanvases) {
+                            // Center narrower pages horizontally
+                            const xOffset = Math.round((maxWidth - pc.width) / 2);
+                            mergedCtx.drawImage(pc, xOffset, yOffset);
+                            yOffset += pc.height;
+                        }
 
                         const blob = await new Promise(resolve =>
-                            canvas.toBlob(resolve, 'image/jpeg', quality)
+                            mergedCanvas.toBlob(resolve, 'image/jpeg', quality)
                         );
 
-                        const pdfBaseName = entry.file.name.replace(/\.pdf$/i, '');
-                        const pageStr = String(i).padStart(3, '0');
-                        const jpgFileName = pdf.numPages === 1
-                            ? `${pdfBaseName}.jpg`
-                            : `${pdfBaseName}_page${pageStr}.jpg`;
-
-                        // Full relative path for ZIP / preview
-                        const fullRelativeName = pdf.numPages === 1
-                            ? `${baseName}.jpg`
-                            : `${baseName}_page${pageStr}.jpg`;
+                        const jpgFileName = `${pdfBaseName}.jpg`;
+                        const fullRelativeName = `${baseName}.jpg`;
 
                         // Save directly to filesystem
                         if (canDirectSave) {
@@ -731,7 +784,6 @@
                                     const targetDir = await getOrCreateSubDir(outputDirHandle, relativeDir);
                                     await writeFileToDir(targetDir, jpgFileName, blob);
                                 } else {
-                                    // same-folder: write next to original PDF
                                     await writeFileToDir(entry.dirHandle, jpgFileName, blob);
                                 }
                                 savedCount++;
@@ -741,7 +793,6 @@
                             }
                         }
 
-                        // Also store for preview / ZIP fallback
                         const imgData = {
                             name: fullRelativeName,
                             blob,
@@ -752,13 +803,79 @@
                         if (convertedImages.length <= 50) {
                             addPreview(imgData);
                         }
-
-                        processedPages++;
-                        updateProgress(processedPages, totalPages);
                     } catch (err) {
-                        setStatus(`오류: ${entry.relativePath} ${i}페이지 - ${err.message}`);
-                        processedPages++;
+                        setStatus(`오류: ${entry.relativePath} - ${err.message}`);
+                        // Count remaining pages as processed
+                        const remaining = pdf.numPages - (processedPages - (totalPages - pdf.numPages));
+                        processedPages += Math.max(0, remaining);
                         updateProgress(processedPages, totalPages);
+                    }
+                } else {
+                    // === Per-page mode (original behavior) ===
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        try {
+                            setStatus(`변환 중: ${entry.relativePath} (${i}/${pdf.numPages}페이지)`);
+
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale });
+
+                            const canvas = document.createElement('canvas');
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+
+                            const ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                            await page.render({ canvasContext: ctx, viewport }).promise;
+
+                            const blob = await new Promise(resolve =>
+                                canvas.toBlob(resolve, 'image/jpeg', quality)
+                            );
+
+                            const pageStr = String(i).padStart(3, '0');
+                            const jpgFileName = pdf.numPages === 1
+                                ? `${pdfBaseName}.jpg`
+                                : `${pdfBaseName}_page${pageStr}.jpg`;
+
+                            const fullRelativeName = pdf.numPages === 1
+                                ? `${baseName}.jpg`
+                                : `${baseName}_page${pageStr}.jpg`;
+
+                            // Save directly to filesystem
+                            if (canDirectSave) {
+                                try {
+                                    if (saveMode === 'new-folder') {
+                                        const targetDir = await getOrCreateSubDir(outputDirHandle, relativeDir);
+                                        await writeFileToDir(targetDir, jpgFileName, blob);
+                                    } else {
+                                        await writeFileToDir(entry.dirHandle, jpgFileName, blob);
+                                    }
+                                    savedCount++;
+                                } catch (writeErr) {
+                                    console.error('파일 저장 오류:', writeErr);
+                                    setStatus(`저장 오류: ${jpgFileName} - ${writeErr.message}`);
+                                }
+                            }
+
+                            const imgData = {
+                                name: fullRelativeName,
+                                blob,
+                                url: URL.createObjectURL(blob)
+                            };
+                            convertedImages.push(imgData);
+
+                            if (convertedImages.length <= 50) {
+                                addPreview(imgData);
+                            }
+
+                            processedPages++;
+                            updateProgress(processedPages, totalPages);
+                        } catch (err) {
+                            setStatus(`오류: ${entry.relativePath} ${i}페이지 - ${err.message}`);
+                            processedPages++;
+                            updateProgress(processedPages, totalPages);
+                        }
                     }
                 }
             }
