@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF → JPG 변환기</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 30px 0 10px;
+            font-size: 2rem;
+            color: #e94560;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 0.95rem;
+        }
+
+        .controls {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 30px;
+            width: 90%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        label {
+            font-size: 0.9rem;
+            color: #aaa;
+            min-width: 80px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: #e94560;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #ff6b81;
+        }
+
+        .btn-secondary {
+            background: #0f3460;
+            color: #eee;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #1a4a8a;
+        }
+
+        .btn-success {
+            background: #2ecc71;
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #27ae60;
+        }
+
+        select, input[type="number"] {
+            background: #0f3460;
+            color: #eee;
+            border: 1px solid #333;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+
+        input[type="number"] {
+            width: 80px;
+        }
+
+        .progress-area {
+            width: 90%;
+            max-width: 800px;
+            margin-top: 20px;
+        }
+
+        .progress-bar-container {
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 30px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #e94560, #ff6b81);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: white;
+            min-width: 40px;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .file-list {
+            width: 90%;
+            max-width: 800px;
+            margin: 20px 0;
+        }
+
+        .file-list h3 {
+            color: #e94560;
+            margin-bottom: 10px;
+        }
+
+        .file-item {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .file-item .path {
+            color: #ccc;
+            word-break: break-all;
+        }
+
+        .file-item .pages {
+            color: #e94560;
+            white-space: nowrap;
+            margin-left: 10px;
+        }
+
+        .preview-area {
+            width: 90%;
+            max-width: 800px;
+            margin: 20px 0 40px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .preview-card {
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .preview-card img {
+            width: 100%;
+            display: block;
+        }
+
+        .preview-card .info {
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            color: #aaa;
+            word-break: break-all;
+        }
+
+        .drop-zone {
+            border: 2px dashed #e94560;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: rgba(233, 69, 96, 0.05);
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            background: rgba(233, 69, 96, 0.15);
+            border-color: #ff6b81;
+        }
+
+        .drop-zone p {
+            font-size: 1.1rem;
+            color: #e94560;
+            margin-bottom: 8px;
+        }
+
+        .drop-zone small {
+            color: #666;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .summary {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        .summary span {
+            color: #e94560;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF → JPG 변환기</h1>
+    <p class="subtitle">폴더를 선택하면 하위 폴더까지 모든 PDF를 찾아 JPG로 변환합니다</p>
+
+    <div class="controls">
+        <div class="drop-zone" id="dropZone">
+            <p>폴더를 선택하세요</p>
+            <small>버튼을 클릭하거나 PDF 파일을 여기에 드래그하세요</small>
+            <input type="file" id="folderInput" webkitdirectory multiple style="display:none">
+            <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+        </div>
+
+        <div class="row">
+            <label>품질 (DPI)</label>
+            <select id="dpiSelect">
+                <option value="1">72 DPI (빠름)</option>
+                <option value="1.5">108 DPI</option>
+                <option value="2" selected>144 DPI (권장)</option>
+                <option value="3">216 DPI (고품질)</option>
+                <option value="4">288 DPI (최고품질)</option>
+            </select>
+
+            <label>JPG 품질</label>
+            <input type="number" id="jpgQuality" min="10" max="100" value="90" step="5">
+            <span style="color:#666">%</span>
+        </div>
+
+        <div class="row">
+            <button class="btn btn-primary" id="btnSelectFolder" onclick="selectFolder()">
+                폴더 선택
+            </button>
+            <button class="btn btn-secondary" id="btnSelectFiles" onclick="selectFiles()">
+                파일 선택
+            </button>
+            <button class="btn btn-success" id="btnConvert" onclick="startConversion()" disabled>
+                변환 시작
+            </button>
+            <button class="btn btn-success" id="btnDownload" onclick="downloadAll()" disabled>
+                ZIP 다운로드
+            </button>
+        </div>
+    </div>
+
+    <div class="progress-area">
+        <div class="progress-bar-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar">0%</div>
+        </div>
+        <div class="status" id="status"></div>
+    </div>
+
+    <div class="file-list" id="fileListArea"></div>
+
+    <div class="preview-area" id="previewArea"></div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let pdfFiles = [];
+        let convertedImages = [];
+
+        // Drag and drop
+        const dropZone = document.getElementById('dropZone');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+
+            const items = e.dataTransfer.items;
+            const files = [];
+
+            // Handle both files and directories from drag/drop
+            const promises = [];
+            for (const item of items) {
+                const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                if (entry) {
+                    promises.push(traverseEntry(entry));
+                }
+            }
+
+            const results = await Promise.all(promises);
+            for (const fileList of results) {
+                files.push(...fileList);
+            }
+
+            if (files.length === 0) {
+                // Fallback: use dropped files directly
+                for (const file of e.dataTransfer.files) {
+                    if (file.name.toLowerCase().endsWith('.pdf')) {
+                        files.push(file);
+                    }
+                }
+            }
+
+            handleFiles(files);
+        });
+
+        async function traverseEntry(entry) {
+            const files = [];
+            if (entry.isFile) {
+                const file = await new Promise((resolve) => entry.file(resolve));
+                if (file.name.toLowerCase().endsWith('.pdf')) {
+                    // Store relative path
+                    file._relativePath = entry.fullPath;
+                    files.push(file);
+                }
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                let allEntries = [];
+                // readEntries may return partial results, so we loop
+                let batch;
+                do {
+                    batch = await new Promise((resolve) => reader.readEntries(resolve));
+                    allEntries.push(...batch);
+                } while (batch.length > 0);
+
+                for (const child of allEntries) {
+                    const childFiles = await traverseEntry(child);
+                    files.push(...childFiles);
+                }
+            }
+            return files;
+        }
+
+        function selectFolder() {
+            document.getElementById('folderInput').click();
+        }
+
+        function selectFiles() {
+            document.getElementById('fileInput').click();
+        }
+
+        document.getElementById('folderInput').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+            handleFiles(files);
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+            handleFiles(files);
+        });
+
+        async function handleFiles(files) {
+            pdfFiles = files;
+            convertedImages = [];
+
+            document.getElementById('btnDownload').disabled = true;
+            document.getElementById('previewArea').innerHTML = '';
+
+            if (files.length === 0) {
+                setStatus('PDF 파일을 찾을 수 없습니다.');
+                document.getElementById('fileListArea').innerHTML = '';
+                document.getElementById('btnConvert').disabled = true;
+                return;
+            }
+
+            // Count total pages
+            let totalPages = 0;
+            const fileInfo = [];
+
+            setStatus('PDF 파일 분석 중...');
+
+            for (const file of files) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    const pages = pdf.numPages;
+                    totalPages += pages;
+                    const path = file._relativePath || file.webkitRelativePath || file.name;
+                    fileInfo.push({ name: path, pages });
+                } catch (err) {
+                    const path = file._relativePath || file.webkitRelativePath || file.name;
+                    fileInfo.push({ name: path, pages: '오류' });
+                }
+            }
+
+            // Display file list
+            let html = '<h3>발견된 PDF 파일</h3>';
+            html += `<div class="summary">총 <span>${files.length}</span>개 PDF, <span>${totalPages}</span>페이지</div>`;
+            for (const info of fileInfo) {
+                html += `<div class="file-item">
+                    <span class="path">${escapeHtml(info.name)}</span>
+                    <span class="pages">${info.pages}페이지</span>
+                </div>`;
+            }
+            document.getElementById('fileListArea').innerHTML = html;
+
+            document.getElementById('btnConvert').disabled = false;
+            setStatus(`${files.length}개 PDF 파일 준비 완료. "변환 시작"을 클릭하세요.`);
+        }
+
+        async function startConversion() {
+            if (pdfFiles.length === 0) return;
+
+            const scale = parseFloat(document.getElementById('dpiSelect').value);
+            const quality = parseInt(document.getElementById('jpgQuality').value) / 100;
+
+            document.getElementById('btnConvert').disabled = true;
+            document.getElementById('btnSelectFolder').disabled = true;
+            document.getElementById('btnSelectFiles').disabled = true;
+            document.getElementById('btnDownload').disabled = true;
+
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.style.display = 'block';
+
+            convertedImages = [];
+            document.getElementById('previewArea').innerHTML = '';
+
+            // Count total pages first
+            let totalPages = 0;
+            const pdfDocs = [];
+
+            for (const file of pdfFiles) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    pdfDocs.push({ file, pdf });
+                    totalPages += pdf.numPages;
+                } catch (err) {
+                    const path = file._relativePath || file.webkitRelativePath || file.name;
+                    setStatus(`오류: ${path} - ${err.message}`);
+                }
+            }
+
+            let processedPages = 0;
+
+            for (const { file, pdf } of pdfDocs) {
+                const path = file._relativePath || file.webkitRelativePath || file.name;
+                const baseName = path.replace(/\.pdf$/i, '');
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    try {
+                        setStatus(`변환 중: ${path} (${i}/${pdf.numPages}페이지)`);
+
+                        const page = await pdf.getPage(i);
+                        const viewport = page.getViewport({ scale });
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+
+                        const ctx = canvas.getContext('2d');
+                        // White background for JPG
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                        await page.render({
+                            canvasContext: ctx,
+                            viewport: viewport
+                        }).promise;
+
+                        const blob = await new Promise(resolve =>
+                            canvas.toBlob(resolve, 'image/jpeg', quality)
+                        );
+
+                        const pageStr = String(i).padStart(3, '0');
+                        const fileName = pdf.numPages === 1
+                            ? `${baseName}.jpg`
+                            : `${baseName}_page${pageStr}.jpg`;
+
+                        convertedImages.push({
+                            name: fileName,
+                            blob: blob,
+                            url: URL.createObjectURL(blob)
+                        });
+
+                        // Show preview (limit to avoid memory issues)
+                        if (convertedImages.length <= 50) {
+                            addPreview(convertedImages[convertedImages.length - 1]);
+                        }
+
+                        processedPages++;
+                        updateProgress(processedPages, totalPages);
+                    } catch (err) {
+                        setStatus(`오류: ${path} ${i}페이지 - ${err.message}`);
+                        processedPages++;
+                        updateProgress(processedPages, totalPages);
+                    }
+                }
+            }
+
+            setStatus(`변환 완료! ${convertedImages.length}개 이미지 생성됨. ZIP 다운로드를 클릭하세요.`);
+            document.getElementById('btnConvert').disabled = false;
+            document.getElementById('btnSelectFolder').disabled = false;
+            document.getElementById('btnSelectFiles').disabled = false;
+            document.getElementById('btnDownload').disabled = false;
+        }
+
+        function addPreview(img) {
+            const card = document.createElement('div');
+            card.className = 'preview-card';
+            card.innerHTML = `
+                <img src="${img.url}" loading="lazy">
+                <div class="info">${escapeHtml(img.name)}</div>
+            `;
+            document.getElementById('previewArea').appendChild(card);
+        }
+
+        async function downloadAll() {
+            if (convertedImages.length === 0) return;
+
+            // Single file: download directly
+            if (convertedImages.length === 1) {
+                const a = document.createElement('a');
+                a.href = convertedImages[0].url;
+                a.download = convertedImages[0].name.split('/').pop();
+                a.click();
+                return;
+            }
+
+            // Multiple files: create ZIP
+            setStatus('ZIP 파일 생성 중...');
+            document.getElementById('btnDownload').disabled = true;
+
+            const zip = new JSZip();
+
+            for (const img of convertedImages) {
+                zip.file(img.name, img.blob);
+            }
+
+            const zipBlob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            }, (metadata) => {
+                updateProgress(metadata.percent, 100);
+            });
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(zipBlob);
+            a.download = 'pdf_to_jpg_converted.zip';
+            a.click();
+
+            URL.revokeObjectURL(a.href);
+            document.getElementById('btnDownload').disabled = false;
+            setStatus(`ZIP 다운로드 완료! (${(zipBlob.size / 1024 / 1024).toFixed(1)}MB)`);
+        }
+
+        function updateProgress(current, total) {
+            const pct = Math.round((current / total) * 100);
+            const bar = document.getElementById('progressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+        }
+
+        function setStatus(msg) {
+            document.getElementById('status').textContent = msg;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
