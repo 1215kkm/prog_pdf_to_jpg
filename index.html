@@ -258,6 +258,96 @@
             color: #e94560;
             font-weight: 600;
         }
+
+        /* Save mode styles */
+        .save-mode-section {
+            background: #0f3460;
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .save-mode-section .section-title {
+            color: #e94560;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 14px;
+        }
+
+        .save-mode-options {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .save-mode-option {
+            flex: 1;
+            min-width: 220px;
+            background: #16213e;
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .save-mode-option:hover {
+            border-color: #e94560;
+        }
+
+        .save-mode-option.selected {
+            border-color: #e94560;
+            background: rgba(233, 69, 96, 0.1);
+        }
+
+        .save-mode-option input[type="radio"] {
+            display: none;
+        }
+
+        .save-mode-option .option-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #eee;
+            margin-bottom: 6px;
+        }
+
+        .save-mode-option .option-desc {
+            font-size: 0.82rem;
+            color: #888;
+            line-height: 1.5;
+        }
+
+        .save-mode-option .option-example {
+            font-size: 0.78rem;
+            color: #e94560;
+            margin-top: 8px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            background: rgba(0,0,0,0.3);
+            padding: 8px 10px;
+            border-radius: 6px;
+            line-height: 1.6;
+            white-space: pre;
+        }
+
+        .selected-folder-info {
+            background: rgba(46, 204, 113, 0.1);
+            border: 1px solid rgba(46, 204, 113, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            color: #2ecc71;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+
+        .api-warning {
+            background: rgba(241, 196, 15, 0.1);
+            border: 1px solid rgba(241, 196, 15, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.82rem;
+            color: #f1c40f;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -267,9 +357,36 @@
     <div class="controls">
         <div class="drop-zone" id="dropZone">
             <p>폴더를 선택하세요</p>
-            <small>버튼을 클릭하거나 PDF 파일을 여기에 드래그하세요</small>
-            <input type="file" id="folderInput" webkitdirectory multiple style="display:none">
-            <input type="file" id="fileInput" accept=".pdf" multiple style="display:none">
+            <small>아래 "폴더 선택" 버튼을 클릭하거나 PDF 파일을 여기에 드래그하세요</small>
+        </div>
+
+        <div class="save-mode-section">
+            <div class="section-title">저장 방식</div>
+            <div class="save-mode-options">
+                <label class="save-mode-option selected" id="modeNewFolder" onclick="selectSaveMode('new-folder')">
+                    <input type="radio" name="saveMode" value="new-folder" checked>
+                    <div class="option-title">새 폴더에 구조 유지</div>
+                    <div class="option-desc">출력 폴더를 선택하면 원본 폴더 구조를 그대로 복사하여 JPG를 저장합니다.</div>
+                    <div class="option-example">출력폴더/
+  문서/
+    보고서.jpg
+  계약서/
+    계약서_page001.jpg
+    계약서_page002.jpg</div>
+                </label>
+                <label class="save-mode-option" id="modeSameFolder" onclick="selectSaveMode('same-folder')">
+                    <input type="radio" name="saveMode" value="same-folder">
+                    <div class="option-title">원본 PDF와 같은 위치</div>
+                    <div class="option-desc">각 PDF 파일이 있는 폴더에 바로 JPG를 저장합니다. 별도의 출력 폴더가 필요 없습니다.</div>
+                    <div class="option-example">원본폴더/
+  문서/
+    보고서.pdf
+    보고서.jpg  (여기에 저장)
+  계약서/
+    계약서.pdf
+    계약서_page001.jpg  (여기에 저장)</div>
+                </label>
+            </div>
         </div>
 
         <div class="row">
@@ -291,15 +408,17 @@
             <button class="btn btn-primary" id="btnSelectFolder" onclick="selectFolder()">
                 폴더 선택
             </button>
-            <button class="btn btn-secondary" id="btnSelectFiles" onclick="selectFiles()">
-                파일 선택
-            </button>
             <button class="btn btn-success" id="btnConvert" onclick="startConversion()" disabled>
                 변환 시작
             </button>
-            <button class="btn btn-success" id="btnDownload" onclick="downloadAll()" disabled>
+            <button class="btn btn-secondary" id="btnDownloadZip" onclick="downloadAllZip()" disabled>
                 ZIP 다운로드
             </button>
+        </div>
+        <div id="selectedFolderInfo" class="selected-folder-info" style="display:none;"></div>
+        <div id="apiWarning" class="api-warning">
+            이 브라우저는 File System Access API를 지원하지 않습니다. Chrome 또는 Edge를 사용해주세요.<br>
+            대안으로 변환 후 ZIP 다운로드를 이용할 수 있습니다.
         </div>
     </div>
 
@@ -317,8 +436,23 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-        let pdfFiles = [];
-        let convertedImages = [];
+        let pdfEntries = [];       // { file: File, relativePath: string, dirHandle: FileSystemDirectoryHandle }
+        let convertedImages = [];  // { name, blob, url }
+        let rootDirHandle = null;  // source folder handle
+        let saveMode = 'new-folder';
+        const hasFileSystemAPI = ('showDirectoryPicker' in window);
+
+        // Check API support
+        if (!hasFileSystemAPI) {
+            document.getElementById('apiWarning').style.display = 'block';
+        }
+
+        // Save mode selection
+        function selectSaveMode(mode) {
+            saveMode = mode;
+            document.getElementById('modeNewFolder').classList.toggle('selected', mode === 'new-folder');
+            document.getElementById('modeSameFolder').classList.toggle('selected', mode === 'same-folder');
+        }
 
         // Drag and drop
         const dropZone = document.getElementById('dropZone');
@@ -336,15 +470,16 @@
             e.preventDefault();
             dropZone.classList.remove('dragover');
 
+            // Drag/drop uses the old entry API - no dirHandle for writing
+            // Collect files and use ZIP fallback
             const items = e.dataTransfer.items;
             const files = [];
 
-            // Handle both files and directories from drag/drop
             const promises = [];
             for (const item of items) {
                 const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
                 if (entry) {
-                    promises.push(traverseEntry(entry));
+                    promises.push(traverseEntryLegacy(entry, ''));
                 }
             }
 
@@ -354,99 +489,119 @@
             }
 
             if (files.length === 0) {
-                // Fallback: use dropped files directly
                 for (const file of e.dataTransfer.files) {
                     if (file.name.toLowerCase().endsWith('.pdf')) {
-                        files.push(file);
+                        files.push({ file, relativePath: file.name, dirHandle: null });
                     }
                 }
             }
 
-            handleFiles(files);
+            rootDirHandle = null;
+            pdfEntries = files;
+            await analyzeFiles();
         });
 
-        async function traverseEntry(entry) {
-            const files = [];
+        async function traverseEntryLegacy(entry, parentPath) {
+            const results = [];
             if (entry.isFile) {
                 const file = await new Promise((resolve) => entry.file(resolve));
                 if (file.name.toLowerCase().endsWith('.pdf')) {
-                    // Store relative path
-                    file._relativePath = entry.fullPath;
-                    files.push(file);
+                    results.push({
+                        file,
+                        relativePath: parentPath ? parentPath + '/' + file.name : file.name,
+                        dirHandle: null
+                    });
                 }
             } else if (entry.isDirectory) {
                 const reader = entry.createReader();
                 let allEntries = [];
-                // readEntries may return partial results, so we loop
                 let batch;
                 do {
                     batch = await new Promise((resolve) => reader.readEntries(resolve));
                     allEntries.push(...batch);
                 } while (batch.length > 0);
 
+                const dirPath = parentPath ? parentPath + '/' + entry.name : entry.name;
                 for (const child of allEntries) {
-                    const childFiles = await traverseEntry(child);
-                    files.push(...childFiles);
+                    const childResults = await traverseEntryLegacy(child, dirPath);
+                    results.push(...childResults);
                 }
             }
-            return files;
+            return results;
         }
 
-        function selectFolder() {
-            document.getElementById('folderInput').click();
+        // Folder selection using File System Access API
+        async function selectFolder() {
+            if (!hasFileSystemAPI) {
+                alert('이 브라우저는 File System Access API를 지원하지 않습니다.\nChrome 또는 Edge를 사용해주세요.');
+                return;
+            }
+
+            try {
+                rootDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                alert('폴더 선택 오류: ' + err.message);
+                return;
+            }
+
+            setStatus('폴더 스캔 중...');
+            document.getElementById('selectedFolderInfo').style.display = 'block';
+            document.getElementById('selectedFolderInfo').textContent = '선택된 폴더: ' + rootDirHandle.name;
+
+            pdfEntries = [];
+            await scanDirectory(rootDirHandle, '', rootDirHandle);
+            await analyzeFiles();
         }
 
-        function selectFiles() {
-            document.getElementById('fileInput').click();
+        // Recursively scan directory using File System Access API
+        async function scanDirectory(dirHandle, relativePath, rootHandle) {
+            for await (const entry of dirHandle.values()) {
+                if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf')) {
+                    const file = await entry.getFile();
+                    pdfEntries.push({
+                        file,
+                        relativePath: relativePath ? relativePath + '/' + entry.name : entry.name,
+                        dirHandle: dirHandle  // parent directory handle for "same folder" mode
+                    });
+                } else if (entry.kind === 'directory') {
+                    const childPath = relativePath ? relativePath + '/' + entry.name : entry.name;
+                    await scanDirectory(entry, childPath, rootHandle);
+                }
+            }
         }
 
-        document.getElementById('folderInput').addEventListener('change', (e) => {
-            const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-            handleFiles(files);
-        });
-
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-            handleFiles(files);
-        });
-
-        async function handleFiles(files) {
-            pdfFiles = files;
+        // Analyze scanned files and show list
+        async function analyzeFiles() {
             convertedImages = [];
-
-            document.getElementById('btnDownload').disabled = true;
+            document.getElementById('btnDownloadZip').disabled = true;
             document.getElementById('previewArea').innerHTML = '';
 
-            if (files.length === 0) {
+            if (pdfEntries.length === 0) {
                 setStatus('PDF 파일을 찾을 수 없습니다.');
                 document.getElementById('fileListArea').innerHTML = '';
                 document.getElementById('btnConvert').disabled = true;
                 return;
             }
 
-            // Count total pages
             let totalPages = 0;
             const fileInfo = [];
 
             setStatus('PDF 파일 분석 중...');
 
-            for (const file of files) {
+            for (const entry of pdfEntries) {
                 try {
-                    const arrayBuffer = await file.arrayBuffer();
+                    const arrayBuffer = await entry.file.arrayBuffer();
                     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    const pages = pdf.numPages;
-                    totalPages += pages;
-                    const path = file._relativePath || file.webkitRelativePath || file.name;
-                    fileInfo.push({ name: path, pages });
+                    totalPages += pdf.numPages;
+                    fileInfo.push({ name: entry.relativePath, pages: pdf.numPages });
                 } catch (err) {
-                    const path = file._relativePath || file.webkitRelativePath || file.name;
-                    fileInfo.push({ name: path, pages: '오류' });
+                    fileInfo.push({ name: entry.relativePath, pages: '오류' });
                 }
             }
 
-            // Display file list
             let html = '<h3>발견된 PDF 파일</h3>';
-            html += `<div class="summary">총 <span>${files.length}</span>개 PDF, <span>${totalPages}</span>페이지</div>`;
+            html += `<div class="summary">총 <span>${pdfEntries.length}</span>개 PDF, <span>${totalPages}</span>페이지</div>`;
             for (const info of fileInfo) {
                 html += `<div class="file-item">
                     <span class="path">${escapeHtml(info.name)}</span>
@@ -456,19 +611,56 @@
             document.getElementById('fileListArea').innerHTML = html;
 
             document.getElementById('btnConvert').disabled = false;
-            setStatus(`${files.length}개 PDF 파일 준비 완료. "변환 시작"을 클릭하세요.`);
+            setStatus(`${pdfEntries.length}개 PDF 파일 준비 완료. "변환 시작"을 클릭하세요.`);
         }
 
+        // Get or create nested subdirectory from a base handle
+        async function getOrCreateSubDir(baseHandle, relativePath) {
+            if (!relativePath) return baseHandle;
+
+            const parts = relativePath.split('/').filter(p => p.length > 0);
+            let current = baseHandle;
+            for (const part of parts) {
+                current = await current.getDirectoryHandle(part, { create: true });
+            }
+            return current;
+        }
+
+        // Write a blob to a directory handle
+        async function writeFileToDir(dirHandle, fileName, blob) {
+            const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+        }
+
+        // Main conversion
         async function startConversion() {
-            if (pdfFiles.length === 0) return;
+            if (pdfEntries.length === 0) return;
 
             const scale = parseFloat(document.getElementById('dpiSelect').value);
             const quality = parseInt(document.getElementById('jpgQuality').value) / 100;
 
+            // For "new-folder" mode, ask user to pick output directory
+            let outputDirHandle = null;
+            if (saveMode === 'new-folder') {
+                try {
+                    outputDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                    alert('출력 폴더 선택 오류: ' + err.message);
+                    return;
+                }
+            }
+
+            // For "same-folder" mode, check we have dirHandles
+            const canDirectSave = (saveMode === 'same-folder' && pdfEntries.every(e => e.dirHandle !== null))
+                || (saveMode === 'new-folder' && outputDirHandle !== null);
+
+            // Disable UI
             document.getElementById('btnConvert').disabled = true;
             document.getElementById('btnSelectFolder').disabled = true;
-            document.getElementById('btnSelectFiles').disabled = true;
-            document.getElementById('btnDownload').disabled = true;
+            document.getElementById('btnDownloadZip').disabled = true;
 
             const progressContainer = document.getElementById('progressContainer');
             progressContainer.style.display = 'block';
@@ -476,31 +668,33 @@
             convertedImages = [];
             document.getElementById('previewArea').innerHTML = '';
 
-            // Count total pages first
+            // Load all PDFs
             let totalPages = 0;
             const pdfDocs = [];
 
-            for (const file of pdfFiles) {
+            for (const entry of pdfEntries) {
                 try {
-                    const arrayBuffer = await file.arrayBuffer();
+                    const arrayBuffer = await entry.file.arrayBuffer();
                     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    pdfDocs.push({ file, pdf });
+                    pdfDocs.push({ entry, pdf });
                     totalPages += pdf.numPages;
                 } catch (err) {
-                    const path = file._relativePath || file.webkitRelativePath || file.name;
-                    setStatus(`오류: ${path} - ${err.message}`);
+                    setStatus(`오류: ${entry.relativePath} - ${err.message}`);
                 }
             }
 
             let processedPages = 0;
+            let savedCount = 0;
 
-            for (const { file, pdf } of pdfDocs) {
-                const path = file._relativePath || file.webkitRelativePath || file.name;
-                const baseName = path.replace(/\.pdf$/i, '');
+            for (const { entry, pdf } of pdfDocs) {
+                const baseName = entry.relativePath.replace(/\.pdf$/i, '');
+                const dirParts = entry.relativePath.split('/');
+                dirParts.pop(); // remove filename
+                const relativeDir = dirParts.join('/');
 
                 for (let i = 1; i <= pdf.numPages; i++) {
                     try {
-                        setStatus(`변환 중: ${path} (${i}/${pdf.numPages}페이지)`);
+                        setStatus(`변환 중: ${entry.relativePath} (${i}/${pdf.numPages}페이지)`);
 
                         const page = await pdf.getPage(i);
                         const viewport = page.getViewport({ scale });
@@ -510,50 +704,78 @@
                         canvas.height = viewport.height;
 
                         const ctx = canvas.getContext('2d');
-                        // White background for JPG
                         ctx.fillStyle = '#FFFFFF';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                        await page.render({
-                            canvasContext: ctx,
-                            viewport: viewport
-                        }).promise;
+                        await page.render({ canvasContext: ctx, viewport }).promise;
 
                         const blob = await new Promise(resolve =>
                             canvas.toBlob(resolve, 'image/jpeg', quality)
                         );
 
+                        const pdfBaseName = entry.file.name.replace(/\.pdf$/i, '');
                         const pageStr = String(i).padStart(3, '0');
-                        const fileName = pdf.numPages === 1
+                        const jpgFileName = pdf.numPages === 1
+                            ? `${pdfBaseName}.jpg`
+                            : `${pdfBaseName}_page${pageStr}.jpg`;
+
+                        // Full relative path for ZIP / preview
+                        const fullRelativeName = pdf.numPages === 1
                             ? `${baseName}.jpg`
                             : `${baseName}_page${pageStr}.jpg`;
 
-                        convertedImages.push({
-                            name: fileName,
-                            blob: blob,
-                            url: URL.createObjectURL(blob)
-                        });
+                        // Save directly to filesystem
+                        if (canDirectSave) {
+                            try {
+                                if (saveMode === 'new-folder') {
+                                    const targetDir = await getOrCreateSubDir(outputDirHandle, relativeDir);
+                                    await writeFileToDir(targetDir, jpgFileName, blob);
+                                } else {
+                                    // same-folder: write next to original PDF
+                                    await writeFileToDir(entry.dirHandle, jpgFileName, blob);
+                                }
+                                savedCount++;
+                            } catch (writeErr) {
+                                console.error('파일 저장 오류:', writeErr);
+                                setStatus(`저장 오류: ${jpgFileName} - ${writeErr.message}`);
+                            }
+                        }
 
-                        // Show preview (limit to avoid memory issues)
+                        // Also store for preview / ZIP fallback
+                        const imgData = {
+                            name: fullRelativeName,
+                            blob,
+                            url: URL.createObjectURL(blob)
+                        };
+                        convertedImages.push(imgData);
+
                         if (convertedImages.length <= 50) {
-                            addPreview(convertedImages[convertedImages.length - 1]);
+                            addPreview(imgData);
                         }
 
                         processedPages++;
                         updateProgress(processedPages, totalPages);
                     } catch (err) {
-                        setStatus(`오류: ${path} ${i}페이지 - ${err.message}`);
+                        setStatus(`오류: ${entry.relativePath} ${i}페이지 - ${err.message}`);
                         processedPages++;
                         updateProgress(processedPages, totalPages);
                     }
                 }
             }
 
-            setStatus(`변환 완료! ${convertedImages.length}개 이미지 생성됨. ZIP 다운로드를 클릭하세요.`);
+            // Final status
+            if (canDirectSave) {
+                const modeText = saveMode === 'new-folder'
+                    ? `"${outputDirHandle.name}" 폴더에`
+                    : '원본 PDF와 같은 위치에';
+                setStatus(`변환 완료! ${savedCount}개 이미지를 ${modeText} 저장했습니다.`);
+            } else {
+                setStatus(`변환 완료! ${convertedImages.length}개 이미지 생성됨. ZIP 다운로드를 이용하세요.`);
+            }
+
             document.getElementById('btnConvert').disabled = false;
             document.getElementById('btnSelectFolder').disabled = false;
-            document.getElementById('btnSelectFiles').disabled = false;
-            document.getElementById('btnDownload').disabled = false;
+            document.getElementById('btnDownloadZip').disabled = convertedImages.length === 0;
         }
 
         function addPreview(img) {
@@ -566,10 +788,10 @@
             document.getElementById('previewArea').appendChild(card);
         }
 
-        async function downloadAll() {
+        // ZIP download (fallback or additional)
+        async function downloadAllZip() {
             if (convertedImages.length === 0) return;
 
-            // Single file: download directly
             if (convertedImages.length === 1) {
                 const a = document.createElement('a');
                 a.href = convertedImages[0].url;
@@ -578,12 +800,10 @@
                 return;
             }
 
-            // Multiple files: create ZIP
             setStatus('ZIP 파일 생성 중...');
-            document.getElementById('btnDownload').disabled = true;
+            document.getElementById('btnDownloadZip').disabled = true;
 
             const zip = new JSZip();
-
             for (const img of convertedImages) {
                 zip.file(img.name, img.blob);
             }
@@ -602,7 +822,7 @@
             a.click();
 
             URL.revokeObjectURL(a.href);
-            document.getElementById('btnDownload').disabled = false;
+            document.getElementById('btnDownloadZip').disabled = false;
             setStatus(`ZIP 다운로드 완료! (${(zipBlob.size / 1024 / 1024).toFixed(1)}MB)`);
         }
 
