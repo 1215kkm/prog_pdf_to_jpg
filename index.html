@@ -720,15 +720,12 @@
                 const pdfBaseName = entry.file.name.replace(/\.pdf$/i, '');
 
                 if (pageMode === 'per-file') {
-                    // === Merge pages into JPG(s), auto-split if canvas too large ===
+                    // === Merge all pages into one JPG ===
                     try {
-                        // Browser canvas limits
-                        const MAX_CANVAS_HEIGHT = 16383;
-                        const MAX_CANVAS_PIXELS = 256 * 1024 * 1024; // ~268M pixels
-
-                        // First pass: render each page individually
                         setStatus(`변환 중: ${entry.relativePath} (전체 ${pdf.numPages}페이지 렌더링 중...)`);
                         const pageCanvases = [];
+                        let totalHeight = 0;
+                        let maxWidth = 0;
 
                         for (let i = 1; i <= pdf.numPages; i++) {
                             setStatus(`변환 중: ${entry.relativePath} (${i}/${pdf.numPages}페이지 렌더링)`);
@@ -747,97 +744,63 @@
                             await page.render({ canvasContext: ctx, viewport }).promise;
 
                             pageCanvases.push(canvas);
+                            totalHeight += viewport.height;
+                            if (viewport.width > maxWidth) maxWidth = viewport.width;
+
                             processedPages++;
                             updateProgress(processedPages, totalPages);
                         }
 
-                        // Group pages into chunks that fit within canvas limits
-                        const chunks = [];
-                        let currentChunk = [];
-                        let currentHeight = 0;
-                        let currentMaxWidth = 0;
+                        // Stitch into one tall canvas
+                        setStatus(`변환 중: ${entry.relativePath} (이미지 합치는 중...)`);
+                        const mergedCanvas = document.createElement('canvas');
+                        mergedCanvas.width = maxWidth;
+                        mergedCanvas.height = totalHeight;
+                        const mergedCtx = mergedCanvas.getContext('2d');
+                        mergedCtx.fillStyle = '#FFFFFF';
+                        mergedCtx.fillRect(0, 0, maxWidth, totalHeight);
 
+                        let yOffset = 0;
                         for (const pc of pageCanvases) {
-                            const newMaxWidth = Math.max(currentMaxWidth, pc.width);
-                            const newHeight = currentHeight + pc.height;
-                            const newPixels = newMaxWidth * newHeight;
-
-                            if (currentChunk.length > 0 &&
-                                (newHeight > MAX_CANVAS_HEIGHT || newPixels > MAX_CANVAS_PIXELS)) {
-                                // Save current chunk, start new one
-                                chunks.push({ pages: currentChunk, width: currentMaxWidth, height: currentHeight });
-                                currentChunk = [pc];
-                                currentHeight = pc.height;
-                                currentMaxWidth = pc.width;
-                            } else {
-                                currentChunk.push(pc);
-                                currentHeight = newHeight;
-                                currentMaxWidth = newMaxWidth;
-                            }
-                        }
-                        if (currentChunk.length > 0) {
-                            chunks.push({ pages: currentChunk, width: currentMaxWidth, height: currentHeight });
+                            const xOffset = Math.round((maxWidth - pc.width) / 2);
+                            mergedCtx.drawImage(pc, xOffset, yOffset);
+                            yOffset += pc.height;
                         }
 
-                        const needsSplit = chunks.length > 1;
+                        const blob = await new Promise(resolve =>
+                            mergedCanvas.toBlob(resolve, 'image/jpeg', quality)
+                        );
 
-                        // Render each chunk into a merged JPG
-                        for (let ci = 0; ci < chunks.length; ci++) {
-                            const chunk = chunks[ci];
-                            setStatus(`변환 중: ${entry.relativePath} (이미지 합치는 중${needsSplit ? ` - 파트 ${ci + 1}/${chunks.length}` : ''}...)`);
+                        const jpgFileName = `${pdfBaseName}.jpg`;
+                        const fullRelativeName = `${baseName}.jpg`;
 
-                            const mergedCanvas = document.createElement('canvas');
-                            mergedCanvas.width = chunk.width;
-                            mergedCanvas.height = chunk.height;
-                            const mergedCtx = mergedCanvas.getContext('2d');
-                            mergedCtx.fillStyle = '#FFFFFF';
-                            mergedCtx.fillRect(0, 0, chunk.width, chunk.height);
-
-                            let yOffset = 0;
-                            for (const pc of chunk.pages) {
-                                const xOffset = Math.round((chunk.width - pc.width) / 2);
-                                mergedCtx.drawImage(pc, xOffset, yOffset);
-                                yOffset += pc.height;
-                            }
-
-                            const blob = await new Promise(resolve =>
-                                mergedCanvas.toBlob(resolve, 'image/jpeg', quality)
-                            );
-
-                            const partSuffix = needsSplit ? `_part${String(ci + 1).padStart(2, '0')}` : '';
-                            const jpgFileName = `${pdfBaseName}${partSuffix}.jpg`;
-                            const fullRelativeName = `${baseName}${partSuffix}.jpg`;
-
-                            if (canDirectSave) {
-                                try {
-                                    if (saveMode === 'new-folder') {
-                                        const targetDir = await getOrCreateSubDir(outputDirHandle, relativeDir);
-                                        await writeFileToDir(targetDir, jpgFileName, blob);
-                                    } else {
-                                        await writeFileToDir(entry.dirHandle, jpgFileName, blob);
-                                    }
-                                    savedCount++;
-                                } catch (writeErr) {
-                                    console.error('파일 저장 오류:', writeErr);
-                                    setStatus(`저장 오류: ${jpgFileName} - ${writeErr.message}`);
+                        if (canDirectSave) {
+                            try {
+                                if (saveMode === 'new-folder') {
+                                    const targetDir = await getOrCreateSubDir(outputDirHandle, relativeDir);
+                                    await writeFileToDir(targetDir, jpgFileName, blob);
+                                } else {
+                                    await writeFileToDir(entry.dirHandle, jpgFileName, blob);
                                 }
-                            }
-
-                            const imgData = {
-                                name: fullRelativeName,
-                                blob,
-                                url: URL.createObjectURL(blob)
-                            };
-                            convertedImages.push(imgData);
-
-                            if (convertedImages.length <= 50) {
-                                addPreview(imgData);
+                                savedCount++;
+                            } catch (writeErr) {
+                                console.error('파일 저장 오류:', writeErr);
+                                setStatus(`저장 오류: ${jpgFileName} - ${writeErr.message}`);
                             }
                         }
 
-                        if (needsSplit) {
-                            setStatus(`${entry.relativePath}: 캔버스 크기 제한으로 ${chunks.length}개 파트로 분할 저장됨`);
+                        const imgData = {
+                            name: fullRelativeName,
+                            blob,
+                            url: URL.createObjectURL(blob)
+                        };
+                        convertedImages.push(imgData);
+
+                        if (convertedImages.length <= 50) {
+                            addPreview(imgData);
                         }
+                        }
+
                     } catch (err) {
                         setStatus(`오류: ${entry.relativePath} - ${err.message}`);
                     }
